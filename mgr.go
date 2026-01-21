@@ -104,7 +104,6 @@ type mgrConfig struct {
 	noInnerImgPreload       bool
 	noShiftfsOnFuse         bool
 	relaxedReadOnly         bool
-	mountBinfmtMisc         bool
 }
 
 type SysboxMgr struct {
@@ -282,28 +281,6 @@ func newSysboxMgr(ctx *cli.Context) (*SysboxMgr, error) {
 		logrus.Info("System container mode enabled.")
 	}
 
-	mountBinfmtMisc := false
-	if syscontMode {
-		binfmtMiscPresent, err := linuxUtils.KernelModSupported("binfmt_misc")
-		if err != nil {
-			return nil, fmt.Errorf("binfmt_misc kernel module check failed: %v", err)
-		}
-
-		if binfmtMiscPresent {
-			binfmtMiscNamespaced, err := linuxUtils.BinfmtMiscNamespacingSupported()
-			if err != nil {
-				return nil, fmt.Errorf("failed to check kernel support for binfmt_misc namespacing: %v", err)
-			}
-
-			if binfmtMiscNamespaced {
-				logrus.Info("binfmt_misc namespacing supported by kernel; will auto mount it in containers.")
-				mountBinfmtMisc = true
-			} else {
-				logrus.Info("binfmt_misc namespacing not supported by kernel; won't auto mount it in containers.")
-			}
-		}
-	}
-
 	mgrCfg := mgrConfig{
 		aliasDns:                ctx.GlobalBoolT("alias-dns"),
 		shiftfsOk:               shiftfsOk,
@@ -319,7 +296,6 @@ func newSysboxMgr(ctx *cli.Context) (*SysboxMgr, error) {
 		fsuidMapFailOnErr:       ctx.GlobalBool("fsuid-map-fail-on-error"),
 		noInnerImgPreload:       !syncVolToRootfs,
 		noShiftfsOnFuse:         ctx.GlobalBool("disable-shiftfs-on-fuse"),
-		mountBinfmtMisc:         mountBinfmtMisc,
 	}
 
 	if !mgrCfg.aliasDns {
@@ -1064,17 +1040,6 @@ func (mgr *SysboxMgr) reqMounts(id string, rootfsUidShiftType idShiftUtils.IDShi
 		mgr.ctLock.Lock()
 		mgr.contTable[id] = info
 		mgr.ctLock.Unlock()
-	}
-
-	// Add the binfmt_misc mount
-	if mgr.mgrCfg.mountBinfmtMisc {
-		binfmtMiscMount := specs.Mount{
-			Destination: "/proc/sys/fs/binfmt_misc",
-			Source:      "binfmt_misc",
-			Type:        "binfmt_misc",
-			Options:     []string{"noexec", "nosuid", "nodev"},
-		}
-		containerMnts = append(containerMnts, binfmtMiscMount)
 	}
 
 	// Dispatch a thread that checks if the container will be auto-removed after it stops
